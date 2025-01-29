@@ -44,7 +44,7 @@ pip install -r requirements.txt
 
 4. Start the Docker containers:
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 5. Pull the Deepseek-r1 model:
