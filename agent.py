@@ -10,6 +10,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 class AIAgent:
     """AI Agent for processing documents and answering questions"""
@@ -71,10 +72,37 @@ class AIAgent:
             embedding=self.embeddings
         )
     
-    def process_file(self, file_path: Path) -> ProcessedFile:
+    def _delete_document_vectors(self, filename: str):
+        """Delete all vectors associated with a specific document"""
+        try:
+            # Create a filter for the specific document
+            file_filter = Filter(
+                must=[
+                    FieldCondition(
+                        key="source",
+                        match=MatchValue(value=filename)
+                    )
+                ]
+            )
+            
+            # Delete points with the filter
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=file_filter
+            )
+            return True
+        except Exception as e:
+            print(f"Error deleting vectors for {filename}: {str(e)}")
+            return False
+    
+    def process_file(self, file_path: Path, is_update: bool = False) -> ProcessedFile:
         """Process a file and add it to the vector store"""
         # Process the file
         processed_file = self.doc_processor.process_file(file_path)
+        
+        # If this is an update, delete existing vectors first
+        if is_update:
+            self._delete_document_vectors(file_path.name)
         
         # Get chunks with embeddings
         chunks = self.doc_processor._split_content(

@@ -16,7 +16,7 @@ if 'agent' not in st.session_state:
 if 'chat_session' not in st.session_state:
     st.session_state.chat_session = ChatSession()
 if 'processed_files' not in st.session_state:
-    st.session_state.processed_files = set()  
+    st.session_state.processed_files = {}  
 
 def save_uploaded_file(uploaded_file):
     """Save uploaded file to a temporary location"""
@@ -38,24 +38,31 @@ with st.sidebar:
     
     if uploaded_files:
         for uploaded_file in uploaded_files:
-            # Check if file was already processed by filename
-            if uploaded_file.name not in st.session_state.processed_files:
-                with st.spinner(f"Processing {uploaded_file.name}..."):
-                    try:
-                        # Save and process file
-                        file_path = save_uploaded_file(uploaded_file)
-                        processed_file = st.session_state.agent.process_file(file_path)
-                        
-                        # Add to processed files set
-                        st.session_state.processed_files.add(uploaded_file.name)
+            with st.spinner(f"Processing {uploaded_file.name}..."):
+                try:
+                    # Save and process file
+                    file_path = save_uploaded_file(uploaded_file)
+                    
+                    # Check if file was already processed
+                    is_update = uploaded_file.name in st.session_state.processed_files
+                    processed_file = st.session_state.agent.process_file(file_path, is_update=is_update)
+                    
+                    # Update processed files dict with new checksum
+                    if is_update:
+                        old_checksum = st.session_state.processed_files[uploaded_file.name]
+                        if old_checksum != processed_file.checksum:
+                            st.info(f"📝 Updated {uploaded_file.name} with new content")
+                        else:
+                            st.info(f"ℹ️ {uploaded_file.name} content unchanged")
+                    else:
                         st.success(f"✅ {uploaded_file.name} processed successfully!")
-                        
-                        # Clean up temporary file
-                        file_path.unlink()
-                    except Exception as e:
-                        st.error(f"❌ Error processing {uploaded_file.name}: {str(e)}")
-            else:
-                st.info(f"📄 {uploaded_file.name} was already processed")
+                    
+                    st.session_state.processed_files[uploaded_file.name] = processed_file.checksum
+                    
+                    # Clean up temporary file
+                    file_path.unlink()
+                except Exception as e:
+                    st.error(f"❌ Error processing {uploaded_file.name}: {str(e)}")
     
     if st.session_state.processed_files:
         st.write("---")
