@@ -44,7 +44,7 @@ with st.sidebar:
     
     # Dropdown menu for section selection
     selected_section = st.selectbox(
-        "Select Section",
+        "Upload or Browse",
         options=["📤 Upload Documents", "🔍 Browse Documents"],
         key="section_selector"
     )
