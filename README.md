@@ -22,6 +22,12 @@ A powerful document processing and chat application built with Streamlit, LangCh
 - Docker and Docker Compose
 - NVIDIA GPU (recommended, but not required)
 
+## Screenshots
+
+![Document AI Assistant Interface](docs/images/Screenshot from 2025-01-30 11-16-09.png)
+
+*The Document AI Assistant provides an intuitive interface for uploading, managing, and chatting with your documents.*
+
 ## Installation and Usage
 
 ### Option 1: Docker Deployment (Recommended)
