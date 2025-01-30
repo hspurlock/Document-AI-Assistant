@@ -84,16 +84,9 @@ with st.sidebar:
                                 file_path.unlink()
                             continue
                         
-                        if is_update:
-                            old_checksum = st.session_state.processed_files[uploaded_file.name]
-                            if old_checksum != processed_file.checksum:
-                                st.info(f"📝 Updated {uploaded_file.name}")
-                                st.session_state.processed_files[uploaded_file.name] = processed_file.checksum
-                            else:
-                                st.info(f"ℹ️ {uploaded_file.name} unchanged")
-                        else:
-                            st.success(f"✅ {uploaded_file.name}")
-                            st.session_state.processed_files[uploaded_file.name] = processed_file.checksum
+                        # Update processed files dict with new checksum
+                        st.session_state.processed_files[uploaded_file.name] = processed_file.checksum
+                        st.success(f"✅ {uploaded_file.name} processed successfully")
                         
                         if file_path.exists():
                             file_path.unlink()
@@ -101,12 +94,6 @@ with st.sidebar:
                         st.error(f"❌ Error: {str(e)}")
                         if file_path and file_path.exists():
                             file_path.unlink()
-        
-        if st.session_state.processed_files:
-            st.write("---")
-            st.write("📚 Processed Documents:")
-            for filename, checksum in st.session_state.processed_files.items():
-                st.write(f"- {filename}")
     
     # Vector Store Browser Section
     if selected_section == "🔍 Browse Documents":
@@ -194,6 +181,26 @@ with st.sidebar:
 # Main chat interface
 st.title("💬 Chat with your Documents")
 
+# Get available models
+available_models = st.session_state.agent.get_available_models()
+if not available_models:
+    available_models = ["deepseek-coder:6.7b"]  # Default fallback
+
+# Initialize selected model in session state if not present
+if 'selected_model' not in st.session_state:
+    st.session_state.selected_model = available_models[0]
+
+# Model selector at top of chat
+col1, col2 = st.columns([1, 3])
+with col1:
+    st.session_state.selected_model = st.selectbox(
+        "🤖 Model",
+        options=available_models,
+        index=available_models.index(st.session_state.selected_model)
+    )
+
+st.write("---")
+
 # Display chat messages
 for message in st.session_state.chat_session.messages:
     with st.chat_message(message.role):
@@ -207,7 +214,11 @@ if prompt := st.chat_input("Ask a question about your documents"):
     
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            response = st.session_state.agent.chat(prompt, st.session_state.chat_session)
+            response = st.session_state.agent.chat(
+                prompt, 
+                st.session_state.chat_session,
+                model_name=st.session_state.selected_model
+            )
             st.write(response)
 
 # Display initial instructions if no messages

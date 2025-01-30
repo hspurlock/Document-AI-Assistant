@@ -13,6 +13,7 @@ from qdrant_client.http import models
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 import os
 import uuid
+import requests
 
 class AIAgent:
     """AI Agent for processing documents and answering questions"""
@@ -229,21 +230,78 @@ class AIAgent:
             print(f"Error getting vector store contents: {str(e)}")
             return {'documents': {}, 'stats': {'total_documents': 0, 'total_chunks': 0, 'total_words': 0}}
     
-    def chat(self, question: str, session: Optional[ChatSession] = None) -> str:
+    def get_available_models(self) -> List[str]:
+        """Get list of available models from Ollama"""
+        try:
+            response = requests.get('http://ollama:11434/api/tags')
+            if response.status_code == 200:
+                models = response.json().get('models', [])
+                return [model['name'] for model in models]
+            return []
+        except Exception as e:
+            print(f"Error getting models: {str(e)}")
+            return []
+    
+    def chat(self, question: str, session: Optional[ChatSession] = None, model_name: str = "deepseek-coder:6.7b") -> str:
         """Process a chat message and return the response"""
         try:
-            # Get response from the chain
-            response = self.retrieval_chain.invoke(question)
+            # Initialize session if not provided
+            if session is None:
+                session = ChatSession()
             
-            # Update session if provided
-            if session is not None:
-                session.messages.append(ChatMessage(role="user", content=question))
-                session.messages.append(ChatMessage(role="assistant", content=response))
+            # Add user message to history
+            session.messages.append(ChatMessage(role="user", content=question))
             
-            return response
+            # Get relevant documents from vector store
+            results = self.client.search(
+                collection_name=self.collection_name,
+                query_vector=self.embeddings.embed_query(question),
+                limit=5
+            )
             
+            # Format context from relevant documents
+            context = "\n\n".join([
+                f"Content: {hit.payload['text']}\n"
+                f"Source: {hit.payload['filename']}"
+                for hit in results
+            ])
+            
+            # Prepare system message with context
+            system_message = (
+                "You are an AI assistant helping with document analysis. "
+                "Answer questions based on the following context from the uploaded documents:\n\n"
+                f"{context}\n\n"
+                "If the context doesn't contain relevant information, say so."
+            )
+            
+            # Prepare conversation history
+            messages = [{"role": "system", "content": system_message}]
+            messages.extend([
+                {"role": msg.role, "content": msg.content}
+                for msg in session.messages[-5:]  # Include last 5 messages for context
+            ])
+            
+            # Get response from Ollama
+            response = requests.post(
+                'http://ollama:11434/api/chat',
+                json={
+                    "model": model_name,
+                    "messages": messages,
+                    "stream": False
+                }
+            )
+            
+            if response.status_code == 200:
+                assistant_message = response.json()['message']['content']
+                session.messages.append(ChatMessage(role="assistant", content=assistant_message))
+                return assistant_message
+            else:
+                error_message = f"Error: {response.status_code} - {response.text}"
+                session.messages.append(ChatMessage(role="assistant", content=error_message))
+                return error_message
+        
         except Exception as e:
-            error_msg = f"Error processing your question: {str(e)}"
-            if session is not None:
-                session.messages.append(ChatMessage(role="error", content=error_msg))
-            return error_msg
+            error_message = f"Error processing chat: {str(e)}"
+            if session:
+                session.messages.append(ChatMessage(role="assistant", content=error_message))
+            return error_message
