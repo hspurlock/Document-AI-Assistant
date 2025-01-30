@@ -22,20 +22,24 @@ class DocumentProcessor:
             separators=["\n\n", "\n", ".", " ", ""]
         )
         
-    def process_file(self, file_path: Path) -> ProcessedFile:
+    def process_file(self, file_path: Path, original_filename: str = None) -> Optional[ProcessedFile]:
         """Process a file and return chunks with metadata"""
-        file_type = self._get_file_type(file_path)
-        content = self._extract_content(file_path, file_type)
-        chunks = self._split_content(content, file_path, file_type)
-        checksum = self._calculate_checksum(file_path)
-        
-        return ProcessedFile(
-            filename=file_path.name,
-            file_type=file_type,
-            checksum=checksum,
-            chunks=len(chunks),
-            metadata={"path": str(file_path)}
-        )
+        try:
+            file_type = self._get_file_type(file_path)
+            content = self._extract_content(file_path, file_type)
+            chunks = self._split_content(content, file_path, file_type, original_filename)
+            checksum = self._calculate_checksum(file_path)
+            
+            return ProcessedFile(
+                filename=original_filename or file_path.name,
+                file_type=file_type,
+                checksum=checksum,
+                chunks=chunks,
+                metadata={"path": str(file_path)}
+            )
+        except Exception as e:
+            print(f"Error processing file: {str(e)}")
+            return None
     
     def _get_file_type(self, file_path: Path) -> str:
         """Determine file type from extension"""
@@ -64,20 +68,26 @@ class DocumentProcessor:
         else:
             raise ValueError(f"Unsupported file type: {file_type}")
     
-    def _split_content(self, content: str, file_path: Path, file_type: str) -> List[DocumentChunk]:
-        """Split content into chunks"""
+    def _split_content(self, content: str, file_path: Path, file_type: str, original_filename: str = None) -> List[DocumentChunk]:
+        """Split content into chunks with metadata"""
         texts = self.text_splitter.split_text(content)
-        return [
-            DocumentChunk(
-                content=chunk,
+        chunks = []
+        
+        for i, text in enumerate(texts):
+            # Determine page number (if available)
+            page = i // 2 + 1  # Simple estimation, 2 chunks per page
+            
+            chunks.append(DocumentChunk(
+                text=text,
                 metadata={
-                    "source": file_path.name,
-                    "file_type": file_type,
+                    "source": original_filename or str(file_path),
+                    "page": str(page),
+                    "chunk_type": "text",
                     "chunk_index": i
                 }
-            )
-            for i, chunk in enumerate(texts)
-        ]
+            ))
+        
+        return chunks
     
     def _extract_pdf(self, file_path: Path) -> str:
         """Extract text from PDF"""

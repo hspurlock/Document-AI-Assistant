@@ -12,6 +12,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 import os
+import uuid
 
 class AIAgent:
     """AI Agent for processing documents and answering questions"""
@@ -99,29 +100,134 @@ class AIAgent:
             print(f"Error deleting vectors for {filename}: {str(e)}")
             return False
     
-    def process_file(self, file_path: Path, is_update: bool = False) -> ProcessedFile:
-        """Process a file and add it to the vector store"""
-        # Process the file
-        processed_file = self.doc_processor.process_file(file_path)
-        
-        # If this is an update, delete existing vectors first
-        if is_update:
-            self._delete_document_vectors(file_path.name)
-        
-        # Get chunks with embeddings
-        chunks = self.doc_processor._split_content(
-            self.doc_processor._extract_content(file_path, processed_file.file_type),
-            file_path,
-            processed_file.file_type
-        )
-        
-        # Add chunks to vector store
-        texts = [chunk.content for chunk in chunks]
-        metadatas = [chunk.metadata for chunk in chunks]
-        
-        self.vector_store.add_texts(texts=texts, metadatas=metadatas)
-        
-        return processed_file
+    def delete_document(self, source: str) -> bool:
+        """Delete a document from the vector store"""
+        try:
+            # Delete all points for this document
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="source",
+                                match=models.MatchValue(value=source)
+                            )
+                        ]
+                    )
+                )
+            )
+            return True
+        except Exception as e:
+            print(f"Error deleting document {source}: {str(e)}")
+            return False
+    
+    def process_file(self, file_path: Path, is_update: bool = False, original_filename: str = None) -> Optional[ProcessedFile]:
+        """Process a file and store its contents in the vector store"""
+        try:
+            # Process the file
+            processed_file = self.doc_processor.process_file(file_path, original_filename)
+            if not processed_file:
+                return None
+            
+            # Create points for vector store
+            points = []
+            for chunk in processed_file.chunks:
+                points.append(models.PointStruct(
+                    id=str(uuid.uuid4()),
+                    payload={
+                        'text': chunk.text,
+                        'source': original_filename or str(file_path),  # Use original filename if available
+                        'filename': original_filename or file_path.name,
+                        'checksum': processed_file.checksum,
+                        'page': chunk.metadata.get('page', ''),
+                        'chunk_type': chunk.metadata.get('chunk_type', 'text'),
+                    },
+                    vector=self.embeddings.embed_query(chunk.text)
+                ))
+            
+            # Update vector store
+            if is_update:
+                # Delete existing points for this file
+                self.client.delete(
+                    collection_name=self.collection_name,
+                    points_selector=models.FilterSelector(
+                        filter=models.Filter(
+                            must=[
+                                models.FieldCondition(
+                                    key="filename",  # Use filename instead of source
+                                    match=models.MatchValue(value=original_filename or file_path.name)
+                                )
+                            ]
+                        )
+                    )
+                )
+            
+            # Insert new points
+            self.client.upsert(
+                collection_name=self.collection_name,
+                points=points
+            )
+            
+            return processed_file
+        except Exception as e:
+            print(f"Error in process_file: {str(e)}")
+            return None
+    
+    def get_vector_store_contents(self, limit: int = 1000) -> Dict:
+        """Get contents of the vector store organized by document"""
+        try:
+            # Get all points from the collection
+            response = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=limit,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            # Organize results by document
+            documents = {}
+            for point in response[0]:
+                source = point.payload.get('source', 'Unknown')
+                if source not in documents:
+                    documents[source] = {
+                        'chunks': [],
+                        'total_chunks': 0,
+                        'pages': set(),
+                        'word_count': 0
+                    }
+                
+                text = point.payload.get('text', '')
+                page = point.payload.get('page', '')
+                
+                documents[source]['chunks'].append({
+                    'id': point.id,
+                    'text': text,
+                    'page': page,
+                    'word_count': len(text.split())
+                })
+                documents[source]['total_chunks'] += 1
+                documents[source]['pages'].add(page)
+                documents[source]['word_count'] += len(text.split())
+            
+            # Convert page sets to sorted lists
+            for doc in documents.values():
+                doc['pages'] = sorted(list(doc['pages']))
+            
+            # Add collection stats
+            stats = {
+                'total_documents': len(documents),
+                'total_chunks': sum(doc['total_chunks'] for doc in documents.values()),
+                'total_words': sum(doc['word_count'] for doc in documents.values())
+            }
+            
+            return {
+                'documents': documents,
+                'stats': stats
+            }
+        except Exception as e:
+            print(f"Error getting vector store contents: {str(e)}")
+            return {'documents': {}, 'stats': {'total_documents': 0, 'total_chunks': 0, 'total_words': 0}}
     
     def chat(self, question: str, session: Optional[ChatSession] = None) -> str:
         """Process a chat message and return the response"""
