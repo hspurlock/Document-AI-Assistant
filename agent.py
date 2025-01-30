@@ -11,6 +11,7 @@ from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.models import Filter, FieldCondition, MatchValue
+import os
 
 class AIAgent:
     """AI Agent for processing documents and answering questions"""
@@ -24,13 +25,16 @@ class AIAgent:
         self.collection_name = collection_name
         
         # Initialize LLM
-        self.llm = OllamaLLM(model=model_name)
+        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        self.llm = OllamaLLM(model=model_name, base_url=ollama_base_url)
         
         # Initialize embeddings
         self.embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
         
         # Initialize Qdrant client
-        self.client = QdrantClient("localhost", port=6333)
+        qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+        qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
+        self.client = QdrantClient(qdrant_host, port=qdrant_port)
         
         # Initialize vector store
         self._init_vector_store()

@@ -16,3 +16,17 @@ services:
       - "11434:11434"
     volumes:
       - ./ollama:/root/.ollama
+
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+    depends_on:
+      - qdrant
+      - ollama
+    environment:
+      - QDRANT_HOST=qdrant
+      - OLLAMA_HOST=ollama
+      - OLLAMA_BASE_URL=http://ollama:11434
