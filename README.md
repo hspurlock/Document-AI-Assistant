@@ -43,8 +43,9 @@ cd <repository-name>
 docker compose up --build -d
 ```
 
-3. Pull the Deepseek-r1 model:
+3. Pull useful models for Ollama:
 ```bash
+docker exec -it document-ai-assistant-ollama-1 ollama pull llama3.2
 docker exec -it document-ai-assistant-ollama-1 ollama pull deepseek-r1
 ```
 
