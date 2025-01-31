@@ -39,7 +39,7 @@ A powerful document processing and chat application built with Streamlit, LangCh
 
 ## Screenshots
 
-![Document AI Assistant Interface](docs/images/Screenshot%20from%202025-01-30%2011-19-22.png)
+![Document AI Assistant Interface](docs/images/Screenshot%20from%202025-01-31%2010-23-12.png)
 
 *The Document AI Assistant provides an intuitive interface for uploading, managing, and chatting with your documents.*
 
