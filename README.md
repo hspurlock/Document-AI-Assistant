@@ -74,8 +74,9 @@ pip install -r requirements.txt
 docker compose up -d qdrant ollama
 ```
 
-5. Pull the Deepseek-r1 model:
+5. Pull useful models for Ollama:
 ```bash
+docker exec -it document-ai-assistant-ollama-1 ollama pull llama3.2
 docker exec -it document-ai-assistant-ollama-1 ollama pull deepseek-r1
 ```
 
