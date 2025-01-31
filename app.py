@@ -1,226 +1,374 @@
-import streamlit as st
 from pathlib import Path
-from agent import AIAgent
-from models import ChatSession
 import tempfile
-import os
-
-st.set_page_config(
-    page_title="Document AI Assistant",
-    page_icon="📚",
-    layout="wide"
-)
+import streamlit as st
+from time import time
+from agent import AIAgent
+from models import ChatSession, ChatMessage
+from security import FileValidator, SessionManager, sanitize_input
 
 # Initialize session state
+if 'upload_status_messages' not in st.session_state:
+    st.session_state.upload_status_messages = []
+
+if 'last_activity' not in st.session_state:
+    st.session_state.last_activity = time()
+
+# Check session timeout
+if SessionManager.check_session_timeout(st.session_state.last_activity):
+    # Clear session state
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
+
+# Update last activity time
+st.session_state.last_activity = time()
+
 if 'agent' not in st.session_state:
     st.session_state.agent = AIAgent()
+
+if 'selected_docs' not in st.session_state:
+    st.session_state.selected_docs = set()
+
+if 'doc_cache_key' not in st.session_state:
+    st.session_state.doc_cache_key = 0
+
+if 'checkbox_key' not in st.session_state:
+    st.session_state.checkbox_key = 0
+
 if 'chat_session' not in st.session_state:
     st.session_state.chat_session = ChatSession()
-if 'processed_files' not in st.session_state:
-    st.session_state.processed_files = {}
 
-def save_uploaded_file(uploaded_file):
-    """Save uploaded file while preserving original filename"""
-    try:
-        # Create a temporary directory if it doesn't exist
-        temp_dir = Path(tempfile.gettempdir()) / "doc_ai_uploads"
-        temp_dir.mkdir(exist_ok=True)
-        
-        # Create file path with original name
-        file_path = temp_dir / uploaded_file.name
-        
-        # Write the file
-        with open(file_path, "wb") as f:
-            f.write(uploaded_file.getvalue())
-        
-        return file_path
-    except Exception as e:
-        st.error(f"Error saving file: {str(e)}")
-        return None
+if 'selected_model' not in st.session_state:
+    models = st.session_state.agent.get_available_models()
+    st.session_state.selected_model = models[0] if models else "-"
 
-# Sidebar for document management
-with st.sidebar:
-    st.title("📚 Document Management")
+if 'last_prompt' not in st.session_state:
+    st.session_state.last_prompt = None
+
+if 'form_submit_key' not in st.session_state:
+    st.session_state.form_submit_key = 0
+
+# Configure page
+st.set_page_config(
+    page_title="Document AI Assistant",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom styling - Using safer CSS
+st.markdown("""
+<style>
+    /* Safe styling using data attributes */
+    [data-testid="MainMenu"] {visibility: hidden;}
+    [data-testid="stFooter"] {visibility: hidden;}
     
-    # Dropdown menu for section selection
-    selected_section = st.selectbox(
-        "Upload or Browse",
-        options=["📤 Upload Documents", "🔍 Browse Documents"],
-        key="section_selector"
-    )
+    /* Button styling */
+    [data-testid="stButton"] button {width: 100%;}
+    
+    /* Hide file list - using safer selectors */
+    [data-testid="stFileUploader"] [data-testid="stMarkdownContainer"] {display: none;}
+    
+    /* Chat interface styling - using safer selectors */
+    [data-testid="stChatMessage"] {max-width: 800px; margin: 1rem auto;}
+    
+    /* Container styling */
+    .main .block-container {padding-bottom: 100px;}
+    
+    /* Chat input styling */
+    .stChatInputContainer {background: var(--background-color); padding: 1rem;}
+</style>
+""", unsafe_allow_html=True)
+
+# Get current documents from vector store
+def get_vector_store_contents():
+    return st.session_state.agent.get_vector_store_contents()
+
+# Get fresh document data using cache key
+vector_store_contents = get_vector_store_contents()
+documents = vector_store_contents
+
+# Sidebar
+with st.sidebar:
+    st.title("Document AI Assistant")
+    
+    # Model selector
+    st.subheader("🤖 Model")
+    models = st.session_state.agent.get_available_models()
+    if not models:
+        st.warning("No models available. Please make sure Ollama is running.")
+        st.selectbox("Select Model", ["-"], label_visibility="collapsed", disabled=True)
+    else:
+        selected = st.selectbox(
+            "Select Model",
+            options=models,
+            index=models.index(st.session_state.selected_model) if st.session_state.selected_model in models else 0,
+            label_visibility="collapsed"
+        )
+        if selected != st.session_state.selected_model:
+            st.session_state.selected_model = selected
+            st.rerun()
     
     st.write("---")
     
-    # Document Upload Section
-    if selected_section == "📤 Upload Documents":
-        st.subheader("📤 Document Upload")
-        st.write("Supported formats: PDF, DOCX, PPTX, XLSX, TXT, MD, HTML")
-        
-        uploaded_files = st.file_uploader(
-            "Upload your documents",
-            type=['pdf', 'docx', 'pptx', 'xlsx', 'txt', 'md', 'html'],
-            accept_multiple_files=True,
-            key='file_uploader'
-        )
-        
-        if uploaded_files:
-            for uploaded_file in uploaded_files:
-                with st.spinner(f"Processing {uploaded_file.name}..."):
-                    try:
-                        file_path = save_uploaded_file(uploaded_file)
-                        if not file_path:
-                            continue
-                        
-                        is_update = uploaded_file.name in st.session_state.processed_files
-                        processed_file = st.session_state.agent.process_file(
-                            file_path, 
-                            is_update=is_update,
-                            original_filename=uploaded_file.name
-                        )
-                        
-                        if not processed_file:
-                            st.error(f"❌ Failed to process {uploaded_file.name}")
-                            if file_path.exists():
-                                file_path.unlink()
-                            continue
-                        
-                        # Update processed files dict with new checksum
-                        st.session_state.processed_files[uploaded_file.name] = processed_file.checksum
-                        st.success(f"✅ {uploaded_file.name} processed successfully")
-                        
+    # Upload documents
+    st.subheader("📤 Upload Documents")
+    st.write("Supported formats: PDF, DOCX, TXT, MD")
+    
+    # Display any persistent status messages
+    for msg in st.session_state.upload_status_messages:
+        if msg['type'] == 'error':
+            st.error(msg['text'], icon='❌')
+        elif msg['type'] == 'warning':
+            st.warning(msg['text'], icon='⚠️')
+        elif msg['type'] == 'info':
+            st.info(msg['text'], icon='ℹ️')
+    
+    # Add clear messages button if there are messages
+    if st.session_state.upload_status_messages:
+        if st.button('Clear Messages', key='clear_status_messages'):
+            st.session_state.upload_status_messages = []
+            st.rerun()
+    
+    status_container = st.empty()
+    status_col1, status_col2 = st.columns([20, 1])
+    with status_col1:
+        status_message = st.empty()
+    with status_col2:
+        close_button = st.empty()
+    
+    uploaded_files = st.file_uploader(
+        "Upload documents",
+        type=["txt", "md", "docx", "pdf"],
+        accept_multiple_files=True,
+        label_visibility="collapsed",
+        key=f"doc_uploader_{st.session_state.doc_cache_key}"
+    )
+
+    has_errors = False
+    
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            # Validate file
+            is_valid, error_msg = FileValidator.validate_file(uploaded_file.name, uploaded_file.size)
+            if not is_valid:
+                st.session_state.upload_status_messages.append({
+                    'type': 'error',
+                    'text': f"Invalid file {uploaded_file.name}: {error_msg}"
+                })
+                has_errors = True
+                continue
+                
+            # Check if file was already processed in this session
+            file_key = f"processed_{uploaded_file.name}_{st.session_state.doc_cache_key}"
+            if file_key not in st.session_state:
+                st.session_state[file_key] = False
+            
+            if not st.session_state[file_key]:
+                status_message.info(f"⏳ Processing {uploaded_file.name}...")
+                try:
+                    file_path = Path(tempfile.gettempdir()) / "doc_ai_uploads" / uploaded_file.name
+                    file_path.parent.mkdir(exist_ok=True)
+                    
+                    # Write the file
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_file.getvalue())
+                    
+                    is_update = uploaded_file.name in documents.get('documents', {})
+                    processed_file = st.session_state.agent.process_file(
+                        file_path, 
+                        is_update=is_update,
+                        original_filename=uploaded_file.name
+                    )
+                    
+                    if not processed_file:
+                        st.session_state.upload_status_messages.append({
+                            'type': 'error',
+                            'text': f"Failed to process {uploaded_file.name}"
+                        })
                         if file_path.exists():
                             file_path.unlink()
-                    except Exception as e:
-                        st.error(f"❌ Error: {str(e)}")
-                        if file_path and file_path.exists():
-                            file_path.unlink()
-    
-    # Vector Store Browser Section
-    if selected_section == "🔍 Browse Documents":
-        st.subheader("🔍 Vector Store Browser")
-        
-        # Get vector store contents
-        contents = st.session_state.agent.get_vector_store_contents()
-        
-        if not contents['documents']:
-            st.info("No documents found. Upload some documents first!")
-        else:
-            # Document selection
-            doc_options = []
-            for source, doc in contents['documents'].items():
-                if doc['chunks']:
-                    filename = doc['chunks'][0].get('filename', Path(source).name)
-                    doc_options.append((source, filename))
-            
-            doc_options.sort(key=lambda x: x[1].lower())
-            
-            selected_doc = st.selectbox(
-                "📑 Select Document",
-                options=[source for source, _ in doc_options],
-                format_func=lambda x: next(filename for s, filename in doc_options if s == x)
-            )
-            
-            doc = contents['documents'][selected_doc]
-            filename = next(filename for s, filename in doc_options if s == selected_doc)
-            
-            # Document info
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Pages", len(doc['pages']))
-            with col2:
-                st.metric("Chunks", doc['total_chunks'])
-            with col3:
-                if st.button("🗑️ Delete", type="secondary", use_container_width=True):
-                    if st.session_state.agent.delete_document(selected_doc):
-                        st.success(f"Deleted {filename}")
-                        st.rerun()
-                    else:
-                        st.error(f"Failed to delete {filename}")
-            
-            # Content view
-            show_content = st.toggle("Show content", value=False)
-            
-            if show_content:
-                # Group chunks by page
-                pages = {}
-                for chunk in doc['chunks']:
-                    page = chunk['page']
-                    if page not in pages:
-                        pages[page] = []
-                    pages[page].append(chunk)
-                
-                # Display pages
-                for page_num in sorted(pages.keys()):
-                    page_chunks = pages[page_num]
+                        has_errors = True
+                        continue
                     
-                    with st.expander(f"📄 Page {page_num}", expanded=False):
-                        # Show first chunk
-                        if page_chunks:
-                            st.markdown(f"```text\n{page_chunks[0]['text']}\n```")
-                            
-                            if len(page_chunks) > 1:
-                                st.markdown(f"```text\n{page_chunks[-1]['text']}\n```")
-                            
-                            if len(page_chunks) > 2:
-                                show_all = st.toggle('Show all', key=f"toggle_{page_num}")
-                                if show_all:
-                                    for chunk in page_chunks[1:-1]:
-                                        st.markdown(f"```text\n{chunk['text']}\n```")
+                    # Show appropriate message
+                    if is_update:
+                        msg = f"ℹ️ Updating {uploaded_file.name}"
+                        status_message.info(msg)
+                        if close_button.button("✕", key=f"close_{uploaded_file.name}_update_{st.session_state.doc_cache_key}"):
+                            status_message.empty()
+                            close_button.empty()
+                    else:
+                        msg = f"✅ {uploaded_file.name} processed successfully"
+                        status_message.success(msg)
+                        if close_button.button("✕", key=f"close_{uploaded_file.name}_success_{st.session_state.doc_cache_key}"):
+                            status_message.empty()
+                            close_button.empty()
+                    
+                    if file_path.exists():
+                        file_path.unlink()
+                    
+                    # Mark file as processed
+                    st.session_state[file_key] = True
+                        
+                except Exception as e:
+                    st.session_state.upload_status_messages.append({
+                        'type': 'error',
+                        'text': f"Error processing {uploaded_file.name}: {str(e)}"
+                    })
+                    if file_path and file_path.exists():
+                        file_path.unlink()
+                    has_errors = True
+        
+        # After all files are processed, rerun if there were errors
+        if has_errors:
+            st.rerun()
+        
+        # After all files are processed, increment cache key and rerun
+        st.session_state.doc_cache_key += 1
+        st.rerun()
+
+    st.write("---")
+    
+    # Document stats
+    st.subheader("📊 Document Stats")
+    stats = documents.get('stats', {})
+    st.write(f"📚 Documents: {stats.get('total_documents', 0):,}")
+    st.write(f"📝 Words: {stats.get('total_words', 0):,}")
+    
+    st.write("---")
+    
+    # Document browser
+    st.subheader("📑 Documents")
+    if not documents.get('documents'):
+        st.info("No documents uploaded yet")
+    else:
+        # Initialize selected docs if not present
+        if 'selected_docs' not in st.session_state:
+            st.session_state.selected_docs = set()
             
-            # Search
+        # Create checkboxes for each document
+        for doc in documents.get('documents', {}):
+            doc_info = documents['documents'][doc]
+            chunks = doc_info.get('total_chunks', 0)
+            pages = len(doc_info.get('pages', []))
+            words = doc_info.get('word_count', 0)
+            
+            label = f"{doc} ({chunks} chunks, {pages} pages, {words:,} words)"
+            checkbox_key = f"doc_{doc}_{st.session_state.checkbox_key}"
+            
+            # Handle checkbox state
+            if checkbox_key not in st.session_state:
+                st.session_state[checkbox_key] = doc in st.session_state.selected_docs
+                
+            checked = st.checkbox(label, key=checkbox_key)
+            
+            if checked and doc not in st.session_state.selected_docs:
+                st.session_state.selected_docs.add(doc)
+            elif not checked and doc in st.session_state.selected_docs:
+                st.session_state.selected_docs.discard(doc)
+        
+        # Show delete button if documents are selected
+        if st.session_state.selected_docs:
             st.write("---")
-            search_term = st.text_input("🔎 Search", placeholder="Enter search term...")
-            
-            if search_term:
-                for chunk in doc['chunks']:
-                    if search_term.lower() in chunk['text'].lower():
-                        with st.expander(f"📄 Page {chunk['page']} - Match", expanded=True):
-                            text = chunk['text'].replace(search_term, f"**{search_term}**")
-                            st.markdown(text)
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("🗑️ Delete Selected", type="primary", key="delete_docs"):
+                    for doc in st.session_state.selected_docs:
+                        st.session_state.agent.delete_document(doc)
+                    st.session_state.selected_docs = set()
+                    st.session_state.checkbox_key += 1  # Increment key to force re-render
+                    st.success("Selected documents deleted")
+                    st.rerun()
+            with col2:
+                if st.button("Clear", key="clear_docs"):
+                    st.session_state.selected_docs = set()
+                    st.session_state.checkbox_key += 1  # Increment key to force re-render
+                    st.rerun()
 
-# Main chat interface
+# Header
 st.title("💬 Chat with your Documents")
-
-# Get available models
-available_models = st.session_state.agent.get_available_models()
-if not available_models:
-    available_models = ["deepseek-coder:6.7b"]  # Default fallback
-
-# Initialize selected model in session state if not present
-if 'selected_model' not in st.session_state:
-    st.session_state.selected_model = available_models[0]
-
-# Model selector at top of chat
-col1, col2 = st.columns([1, 3])
-with col1:
-    st.session_state.selected_model = st.selectbox(
-        "🤖 Model",
-        options=available_models,
-        index=available_models.index(st.session_state.selected_model)
-    )
 
 st.write("---")
 
-# Display chat messages
-for message in st.session_state.chat_session.messages:
-    with st.chat_message(message.role):
-        st.write(message.content)
+# Add CSS to ensure chat messages use full width
+st.markdown("""
+<style>
+[data-testid="stChatMessageContent"] {
+    width: 100% !important;
+    max-width: 100% !important;
+}
 
-# Chat input
-if prompt := st.chat_input("Ask a question about your documents"):
-    # Get bot response
+/* Target the message container to ensure full width */
+.stChatMessage {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+/* Ensure the content inside messages spans full width */
+.stMarkdown {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+/* Remove any fixed width constraints */
+div[data-testid="stChatMessageContent"] > div {
+    width: auto !important;
+    max-width: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Create containers for messages and input
+messages_container = st.container()
+input_container = st.container()
+
+# Chat interface
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
+
+# Display messages
+if not st.session_state.messages:
+    if not documents.get('documents'):
+        st.info("👋 No documents uploaded yet. Upload documents to start asking questions!")
+    else:
+        st.info("👋 Ready to help! Ask me questions about your uploaded documents.")
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
+
+# Get user input
+prompt = st.chat_input("Ask a question about your documents...")
+
+# Handle input
+if prompt:
+    if not documents.get('documents'):
+        st.warning("Please upload some documents first")
+        st.stop()
+    
+    if st.session_state.selected_model == "-":
+        st.error("No models available. Please make sure Ollama is running.")
+        st.stop()
+    
+    # Add user message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # Display user message
     with st.chat_message("user"):
         st.write(prompt)
     
+    # Get and display AI response
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
+            # Use selected docs if any are selected, otherwise use all documents
+            selected_docs = list(st.session_state.selected_docs) if st.session_state.selected_docs else list(documents.get('documents', {}).keys())
+            
             response = st.session_state.agent.chat(
-                prompt, 
+                prompt,
                 st.session_state.chat_session,
-                model_name=st.session_state.selected_model
+                model_name=st.session_state.selected_model,
+                filter_docs=selected_docs
             )
             st.write(response)
-
-# Display initial instructions if no messages
-if not st.session_state.chat_session.messages:
-    st.info("👋 Upload your documents using the sidebar and start asking questions!")
+            st.session_state.messages.append({"role": "assistant", "content": response})

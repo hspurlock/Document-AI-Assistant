@@ -10,9 +10,13 @@ import markdown
 import chardet
 from models import ProcessedFile, DocumentChunk
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from security import RateLimiter, validate_content
 
 class DocumentProcessor:
     """Handles processing of different document types"""
+    
+    # Initialize rate limiter as a class variable
+    _rate_limiter = RateLimiter()
     
     def __init__(self):
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -21,12 +25,20 @@ class DocumentProcessor:
             length_function=len,
             separators=["\n\n", "\n", ".", " ", ""]
         )
-        
+    
     def process_file(self, file_path: Path, original_filename: str = None) -> Optional[ProcessedFile]:
         """Process a file and return chunks with metadata"""
         try:
+            # Check rate limit
+            self._rate_limiter.check_rate_limit('process_file')
             file_type = self._get_file_type(file_path)
             content = self._extract_content(file_path, file_type)
+            
+            # Validate content
+            is_valid, error_msg = validate_content(content)
+            if not is_valid:
+                raise ValueError(f"Invalid content: {error_msg}")
+                
             chunks = self._split_content(content, file_path, file_type, original_filename)
             checksum = self._calculate_checksum(file_path)
             
