@@ -4,11 +4,17 @@ A powerful document processing and chat application built with Streamlit, LangCh
 
 ## Features
 
-### Document Processing
+### Document and Image Processing
 - Support for multiple formats:
   - PDF documents
   - Word documents (DOCX)
   - Text files (TXT)
+  - Images (PNG, JPG, JPEG, GIF, BMP)
+- Advanced image analysis:
+  - AI-powered image descriptions
+  - Object detection and recognition
+  - Text extraction from images (OCR)
+  - Fallback processing for complex images
 - Automatic text extraction and smart chunking
 - Progress tracking for large documents
 - Clear error handling and status messages
@@ -58,10 +64,11 @@ cd <repository-name>
 docker compose up --build -d
 ```
 
-3. Pull useful models for Ollama:
+3. Pull required models for Ollama:
 ```bash
 docker exec -it document-ai-assistant-ollama-1 ollama pull llama3.2
 docker exec -it document-ai-assistant-ollama-1 ollama pull deepseek-r1
+docker exec -it document-ai-assistant-ollama-1 ollama pull llama3.2-vision
 ```
 
 4. Access the application at `http://localhost:8501`
@@ -90,10 +97,11 @@ pip install -r requirements.txt
 docker compose up -d qdrant ollama
 ```
 
-5. Pull useful models for Ollama:
+5. Pull required models for Ollama:
 ```bash
 docker exec -it document-ai-assistant-ollama-1 ollama pull llama3.2
 docker exec -it document-ai-assistant-ollama-1 ollama pull deepseek-r1
+docker exec -it document-ai-assistant-ollama-1 ollama pull llama3.2-vision
 ```
 
 6. Start the Streamlit application:
@@ -101,15 +109,68 @@ docker exec -it document-ai-assistant-ollama-1 ollama pull deepseek-r1
 streamlit run app.py
 ```
 
+## Technical Details
+
+### Document Processing
+
+- **Text Extraction**: Uses specialized libraries for each document type:
+  - PDF: PyPDF for text extraction
+  - DOCX: python-docx for parsing
+  - TXT/MD: Direct reading with encoding detection
+  - Images: Multi-stage processing pipeline
+
+- **Image Analysis**:
+  - Primary: Llava Vision Model
+    - Advanced text extraction from images
+    - Rich image descriptions
+    - Object detection and classification
+    - Direct API integration with Ollama
+  - Fallback Models:
+    - llama3.2-vision for complex images
+    - llama2 as final fallback
+  - Enhanced Metadata:
+    - Image dimensions and format
+    - Detected objects and text
+    - Vision model descriptions
+    - Automatic text chunking for vector storage
+
+- **Content Processing**:
+  - Smart text chunking with overlap
+  - Unified chunking for both documents and images
+  - Rich metadata extraction and preservation
+  - Vector embedding for semantic search
+  - Specialized image text representation
+  - Automatic chunk size optimization
+
+### Vector Search
+
+- Uses Qdrant for efficient similarity search
+- Enhanced metadata for images and documents
+  - Image dimensions and format
+  - Page numbers and chunk types
+  - Source tracking and checksums
+- Optimized chunk size for better context
+- Unified vector storage for all content types
+
+### Security
+
+- Rate limiting on API endpoints
+- Input sanitization and validation
+- Secure file handling with cleanup
+- Temporary storage for uploads
+
 7. Access the application at `http://localhost:8501`
 
 ## Usage Guide
 
-1. **Upload Documents**
+1. **Upload Documents and Images**
    - Use the file uploader in the sidebar
-   - Supported formats: PDF, DOCX, TXT
+   - Supported formats:
+     - Documents: PDF, DOCX, TXT
+     - Images: PNG, JPG, JPEG, GIF, BMP
    - Monitor upload progress and status messages
-   - Wait for processing to complete
+   - Real-time processing feedback
+   - Automatic text extraction from images
 
 2. **Select Documents to Query**
    - Choose specific documents in the sidebar to focus your search

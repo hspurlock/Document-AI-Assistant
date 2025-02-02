@@ -24,7 +24,9 @@ if SessionManager.check_session_timeout(st.session_state.last_activity):
 st.session_state.last_activity = time()
 
 if 'agent' not in st.session_state:
-    st.session_state.agent = AIAgent()
+    models = AIAgent.get_available_models()
+    st.session_state.selected_model = models[0] if models else "-"
+    st.session_state.agent = AIAgent(model_name=st.session_state.selected_model)
 
 if 'selected_docs' not in st.session_state:
     st.session_state.selected_docs = set()
@@ -107,13 +109,16 @@ with st.sidebar:
         )
         if selected != st.session_state.selected_model:
             st.session_state.selected_model = selected
+            # Reinitialize agent with new model
+            st.session_state.agent = AIAgent(model_name=selected)
             st.rerun()
     
     st.write("---")
     
-    # Upload documents
-    st.subheader("📤 Upload Documents")
-    st.write("Supported formats: PDF, DOCX, TXT, MD")
+    # Upload documents and images
+    st.subheader("📤 Upload Files")
+    st.write("📄 Documents: PDF, DOCX, TXT, MD")
+    st.write("🖼️ Images: PNG, JPG, JPEG, GIF, BMP")
     
     # Display any persistent status messages
     for msg in st.session_state.upload_status_messages:
@@ -138,8 +143,8 @@ with st.sidebar:
         close_button = st.empty()
     
     uploaded_files = st.file_uploader(
-        "Upload documents",
-        type=["txt", "md", "docx", "pdf"],
+        "Upload files",
+        type=["txt", "md", "docx", "pdf", "png", "jpg", "jpeg", "gif", "bmp"],
         accept_multiple_files=True,
         label_visibility="collapsed",
         key=f"doc_uploader_{st.session_state.doc_cache_key}"
@@ -165,7 +170,16 @@ with st.sidebar:
                 st.session_state[file_key] = False
             
             if not st.session_state[file_key]:
-                status_message.info(f"⏳ Processing {uploaded_file.name}...")
+                # Get file extension
+                ext = uploaded_file.name.rsplit('.', 1)[1].lower() if '.' in uploaded_file.name else ''
+                is_image = ext in ['png', 'jpg', 'jpeg', 'gif', 'bmp']
+                
+                # Show appropriate processing message
+                if is_image:
+                    status_message.info(f"🔍 Processing image: {uploaded_file.name}...")
+                else:
+                    status_message.info(f"📄 Processing document: {uploaded_file.name}...")
+                
                 try:
                     file_path = Path(tempfile.gettempdir()) / "doc_ai_uploads" / uploaded_file.name
                     file_path.parent.mkdir(exist_ok=True)
@@ -191,13 +205,47 @@ with st.sidebar:
                         has_errors = True
                         continue
                     
-                    # Show appropriate message
+                    # Show appropriate success message
                     if is_update:
                         msg = f"ℹ️ Updating {uploaded_file.name}"
                         status_message.info(msg)
-                        if close_button.button("✕", key=f"close_{uploaded_file.name}_update_{st.session_state.doc_cache_key}"):
-                            status_message.empty()
-                            close_button.empty()
+                    elif is_image:
+                        if processed_file.image_metadata:
+                            msg_parts = [f"✅ Image processed: {uploaded_file.name}"]
+                            
+                            # Add vision model results
+                            if processed_file.image_metadata.vision_description:
+                                msg_parts.append(f"Vision: {processed_file.image_metadata.vision_description[:100]}...")
+                            
+                            if processed_file.image_metadata.detected_objects:
+                                objects = ', '.join(processed_file.image_metadata.detected_objects[:5])
+                                if len(processed_file.image_metadata.detected_objects) > 5:
+                                    objects += f" and {len(processed_file.image_metadata.detected_objects) - 5} more"
+                                msg_parts.append(f"Objects: {objects}")
+                            
+                            # Add text detection results
+                            if processed_file.image_metadata.vision_error and not processed_file.image_metadata.detected_text:
+                                msg_parts.append(f"Text detection failed: {processed_file.image_metadata.vision_error}")
+                                status_message.warning(' | '.join(msg_parts))
+                            elif processed_file.image_metadata.detected_text:
+                                text_preview = processed_file.image_metadata.detected_text[:50]
+                                if len(processed_file.image_metadata.detected_text) > 50:
+                                    text_preview += "..."
+                                msg_parts.append(f"Text found: {text_preview}")
+                                status_message.success(' | '.join(msg_parts))
+                            else:
+                                msg_parts.append("No text found")
+                                status_message.info(' | '.join(msg_parts))
+                        else:
+                            msg = f"✅ Image processed: {uploaded_file.name}"
+                            status_message.success(msg)
+                    else:
+                        msg = f"✅ Document processed: {uploaded_file.name}"
+                        status_message.success(msg)
+                    
+                    if close_button.button("✕", key=f"close_{uploaded_file.name}_update_{st.session_state.doc_cache_key}"):
+                        status_message.empty()
+                        close_button.empty()
                     else:
                         msg = f"✅ {uploaded_file.name} processed successfully"
                         status_message.success(msg)
@@ -220,9 +268,13 @@ with st.sidebar:
                         file_path.unlink()
                     has_errors = True
         
-        # After all files are processed, rerun if there were errors
+        # Display any error messages that occurred during processing
         if has_errors:
-            st.rerun()
+            for msg in st.session_state.upload_status_messages:
+                if msg['type'] == 'error':
+                    st.error(msg['text'])
+            # Clear the messages to prevent them from showing again
+            st.session_state.upload_status_messages = []
         
         # After all files are processed, increment cache key and rerun
         st.session_state.doc_cache_key += 1

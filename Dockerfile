@@ -9,6 +9,10 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     gcc \
     g++ \
+    libmagic1 \
+    libmagic-dev \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache

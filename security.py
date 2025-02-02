@@ -58,8 +58,18 @@ def validate_content(content: str, max_length: int = 10_000_000) -> tuple[bool, 
 
 # File validation
 class FileValidator:
-    ALLOWED_EXTENSIONS = {'txt', 'md', 'docx', 'pdf'}
-    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+    # Document extensions
+    DOCUMENT_EXTENSIONS = {'txt', 'md', 'docx', 'pdf'}
+    
+    # Image extensions
+    IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp'}
+    
+    # All allowed extensions
+    ALLOWED_EXTENSIONS = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS
+    
+    # Size limits
+    MAX_DOCUMENT_SIZE = 10 * 1024 * 1024  # 10MB for documents
+    MAX_IMAGE_SIZE = 5 * 1024 * 1024      # 5MB for images
     
     @classmethod
     def validate_file(cls, filename: str, file_size: int) -> tuple[bool, Optional[str]]:
@@ -70,11 +80,17 @@ class FileValidator:
         
         ext = filename.rsplit('.', 1)[1].lower()
         if ext not in cls.ALLOWED_EXTENSIONS:
-            return False, f"File type {ext} not allowed"
+            return False, (f"File type '{ext}' not allowed. Supported types: " +
+                          f"Documents: {', '.join(sorted(cls.DOCUMENT_EXTENSIONS))}, " +
+                          f"Images: {', '.join(sorted(cls.IMAGE_EXTENSIONS))}")
         
-        # Check file size
-        if file_size > cls.MAX_FILE_SIZE:
-            return False, f"File size exceeds maximum limit of {cls.MAX_FILE_SIZE/1024/1024}MB"
+        # Check file size based on type
+        if ext in cls.IMAGE_EXTENSIONS:
+            if file_size > cls.MAX_IMAGE_SIZE:
+                return False, f"Image size exceeds maximum limit of {cls.MAX_IMAGE_SIZE/1024/1024:.1f}MB"
+        else:
+            if file_size > cls.MAX_DOCUMENT_SIZE:
+                return False, f"Document size exceeds maximum limit of {cls.MAX_DOCUMENT_SIZE/1024/1024:.1f}MB"
         
         return True, None
 

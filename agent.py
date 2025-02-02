@@ -1,10 +1,11 @@
+import os
 from pathlib import Path
 from typing import List, Dict, Optional
 from models import ProcessedFile, ChatMessage, ChatSession, DocumentChunk
 from document_processor import DocumentProcessor
 from security import sanitize_input, RateLimiter
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_ollama import OllamaLLM
+from llm_provider import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
@@ -12,27 +13,39 @@ from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.models import Filter, FieldCondition, MatchValue
-import os
 import uuid
 import requests
 
 class AIAgent:
-    """AI Agent for processing documents and answering questions"""
+    """AI Agent for processing documents, images, and answering questions.
+    
+    Features:
+    - Document and image processing with unified chunking
+    - Vector storage with rich metadata for both documents and images
+    - Semantic search across all content types
+    - LLM-powered chat interface with context awareness
+    
+    The agent uses:
+    - Qdrant for vector storage and retrieval
+    - LangChain for document processing and LLM integration
+    - HuggingFace embeddings for vector creation
+    - Ollama for local LLM inference
+    """
     
     # Initialize rate limiter as a class variable
     _rate_limiter = RateLimiter()
     
     def __init__(self, 
+                 model_name: str,  # Model name must be provided, typically from UI selection
                  collection_name: str = "documents",
-                 model_name: str = "deepseek-r1",
                  embedding_model: str = "all-MiniLM-L6-v2"):
         # Initialize components
         self.doc_processor = DocumentProcessor()
         self.collection_name = collection_name
+        self.last_sources = set()  # Track last used document sources
         
         # Initialize LLM
-        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        self.llm = OllamaLLM(model=model_name, base_url=ollama_base_url)
+        self.llm = get_llm(model_name)
         
         # Initialize embeddings
         self.embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
@@ -128,7 +141,26 @@ class AIAgent:
             return False
     
     def process_file(self, file_path: Path, is_update: bool = False, original_filename: str = None) -> Optional[ProcessedFile]:
-        """Process a file and store its contents in the vector store"""
+        """Process a file or image and store its contents in the vector store.
+        
+        Handles both documents and images with a unified approach:
+        1. Processes the file using DocumentProcessor
+        2. Creates vector store points with rich metadata
+        3. Stores points in Qdrant for semantic search
+        
+        For images, includes additional metadata:
+        - Image dimensions and format
+        - Chunk type (image_text)
+        - Page information
+        
+        Args:
+            file_path: Path to the file to process
+            is_update: Whether this is updating an existing file
+            original_filename: Optional original name of the file
+            
+        Returns:
+            ProcessedFile with chunks and metadata, or None if processing fails
+        """
         try:
             # Process the file
             processed_file = self.doc_processor.process_file(file_path, original_filename)
@@ -137,16 +169,21 @@ class AIAgent:
             
             # Create points for vector store
             points = []
+            
+            # Create points from document chunks (both regular and image)
             for chunk in processed_file.chunks:
                 points.append(models.PointStruct(
                     id=str(uuid.uuid4()),
                     payload={
                         'text': chunk.text,
-                        'source': original_filename or str(file_path),  # Use original filename if available
+                        'source': original_filename or str(file_path),
                         'filename': original_filename or file_path.name,
                         'checksum': processed_file.checksum,
                         'page': chunk.metadata.get('page', ''),
                         'chunk_type': chunk.metadata.get('chunk_type', 'text'),
+                        'width': chunk.metadata.get('width'),  # Will be None for non-images
+                        'height': chunk.metadata.get('height'),
+                        'format': chunk.metadata.get('format')
                     },
                     vector=self.embeddings.embed_query(chunk.text)
                 ))
@@ -234,7 +271,8 @@ class AIAgent:
             print(f"Error getting vector store contents: {str(e)}")
             return {'documents': {}, 'stats': {'total_documents': 0, 'total_chunks': 0, 'total_words': 0}}
     
-    def get_available_models(self) -> List[str]:
+    @staticmethod
+    def get_available_models() -> List[str]:
         """Get list of available models from Ollama"""
         try:
             response = requests.get('http://ollama:11434/api/tags')
@@ -246,44 +284,10 @@ class AIAgent:
             print(f"Error getting models: {str(e)}")
             return []
     
-    def __init__(self, collection_name: str = "documents", model_name: str = "deepseek-r1", embedding_model: str = "all-MiniLM-L6-v2"):
-        # Initialize components
-        self.doc_processor = DocumentProcessor()
-        self.collection_name = collection_name
-        self.last_sources = set()
-        
-        # Initialize LLM
-        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        self.llm = OllamaLLM(model=model_name, base_url=ollama_base_url)
-        
-        # Initialize embeddings
-        self.embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
-        
-        # Initialize Qdrant client
-        qdrant_host = os.getenv("QDRANT_HOST", "localhost")
-        qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
-        self.client = QdrantClient(qdrant_host, port=qdrant_port)
-        
-        # Initialize vector store
-        self._init_vector_store()
-        
-        # Initialize chat prompt
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a helpful assistant that answers questions based on the provided context. "
-                      "If you don't know the answer, just say that you don't know. "
-                      "Always provide your response in a clear, concise manner."),
-            ("human", "Context: {context}\n\nQuestion: {question}")
-        ])
-        
-        # Setup the retrieval chain
-        self.retrieval_chain = (
-            {"context": self.vector_store.as_retriever(), "question": RunnablePassthrough()}
-            | self.prompt
-            | self.llm
-            | StrOutputParser()
-        )
     
-    def chat(self, question: str, session: Optional[ChatSession] = None, model_name: str = "deepseek-coder:6.7b", filter_docs: Optional[List[str]] = None) -> str:
+    
+    
+    def chat(self, question: str, session: Optional[ChatSession] = None, model_name: Optional[str] = None, filter_docs: Optional[List[str]] = None) -> str:
         """Process a chat message and return the response"""
         try:
             # Check rate limit with higher limit for chat
@@ -294,9 +298,8 @@ class AIAgent:
             if not question:
                 raise ValueError("Invalid or empty question")
             
-            model_name = sanitize_input(model_name)
-            if not model_name:
-                model_name = "deepseek-coder:6.7b"
+            # Use provided model_name if valid, otherwise fall back to the one from initialization
+            model_name = sanitize_input(model_name) if model_name else self.model_name
             # Initialize session if not provided
             if session is None:
                 session = ChatSession()
