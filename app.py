@@ -144,7 +144,7 @@ with st.sidebar:
     
     uploaded_files = st.file_uploader(
         "Upload files",
-        type=["txt", "md", "docx", "pdf", "png", "jpg", "jpeg", "gif", "bmp"],
+        type=["txt", "md", "docx", "pdf", "xlsx", "xls", "csv", "png", "jpg", "jpeg", "gif", "bmp"],
         accept_multiple_files=True,
         label_visibility="collapsed",
         key=f"doc_uploader_{st.session_state.doc_cache_key}"

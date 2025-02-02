@@ -61,11 +61,14 @@ class FileValidator:
     # Document extensions
     DOCUMENT_EXTENSIONS = {'txt', 'md', 'docx', 'pdf'}
     
+    # Spreadsheet extensions
+    SPREADSHEET_EXTENSIONS = {'xlsx', 'xls', 'csv'}
+    
     # Image extensions
     IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp'}
     
     # All allowed extensions
-    ALLOWED_EXTENSIONS = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS
+    ALLOWED_EXTENSIONS = DOCUMENT_EXTENSIONS | SPREADSHEET_EXTENSIONS | IMAGE_EXTENSIONS
     
     # Size limits
     MAX_DOCUMENT_SIZE = 10 * 1024 * 1024  # 10MB for documents
@@ -82,12 +85,16 @@ class FileValidator:
         if ext not in cls.ALLOWED_EXTENSIONS:
             return False, (f"File type '{ext}' not allowed. Supported types: " +
                           f"Documents: {', '.join(sorted(cls.DOCUMENT_EXTENSIONS))}, " +
+                          f"Spreadsheets: {', '.join(sorted(cls.SPREADSHEET_EXTENSIONS))}, " +
                           f"Images: {', '.join(sorted(cls.IMAGE_EXTENSIONS))}")
         
         # Check file size based on type
         if ext in cls.IMAGE_EXTENSIONS:
             if file_size > cls.MAX_IMAGE_SIZE:
                 return False, f"Image size exceeds maximum limit of {cls.MAX_IMAGE_SIZE/1024/1024:.1f}MB"
+        elif ext in cls.SPREADSHEET_EXTENSIONS:
+            if file_size > cls.MAX_DOCUMENT_SIZE:
+                return False, f"Spreadsheet size exceeds maximum limit of {cls.MAX_DOCUMENT_SIZE/1024/1024:.1f}MB"
         else:
             if file_size > cls.MAX_DOCUMENT_SIZE:
                 return False, f"Document size exceeds maximum limit of {cls.MAX_DOCUMENT_SIZE/1024/1024:.1f}MB"

@@ -8,6 +8,7 @@ A powerful document processing and chat application built with Streamlit, LangCh
 - Support for multiple formats:
   - PDF documents
   - Word documents (DOCX)
+  - Spreadsheets (XLSX, XLS, CSV)
   - Text files (TXT)
   - Images (PNG, JPG, JPEG, GIF, BMP)
 - Advanced image analysis:
@@ -116,6 +117,7 @@ streamlit run app.py
 - **Text Extraction**: Uses specialized libraries for each document type:
   - PDF: PyPDF for text extraction
   - DOCX: python-docx for parsing
+  - Spreadsheets: pandas for Excel and CSV processing
   - TXT/MD: Direct reading with encoding detection
   - Images: Multi-stage processing pipeline
 
@@ -167,6 +169,7 @@ streamlit run app.py
    - Use the file uploader in the sidebar
    - Supported formats:
      - Documents: PDF, DOCX, TXT
+     - Spreadsheets: XLSX, XLS, CSV
      - Images: PNG, JPG, JPEG, GIF, BMP
    - Monitor upload progress and status messages
    - Real-time processing feedback

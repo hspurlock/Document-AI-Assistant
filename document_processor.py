@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 import markdown
 import chardet
 import base64
+import pandas as pd
 from models import ProcessedFile, DocumentChunk, ImageMetadata
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from security import RateLimiter, validate_content
@@ -136,6 +137,8 @@ class DocumentProcessor:
             return 'docx'
         elif ext in ['png', 'jpg', 'jpeg', 'gif', 'bmp']:
             return 'image'
+        elif ext in ['xlsx', 'xls', 'csv']:
+            return 'spreadsheet'
         else:
             raise ValueError(f"Unsupported file type: {ext}")
     
@@ -186,6 +189,8 @@ class DocumentProcessor:
             content = self._extract_pdf(file_path)
         elif file_type == 'docx':
             content = self._extract_docx(file_path)
+        elif file_type == 'spreadsheet':
+            content = self._extract_spreadsheet(file_path)
         elif file_type in ['txt', 'md', 'html']:
             content = self._extract_text(file_path, file_type)
         else:
@@ -630,6 +635,57 @@ class DocumentProcessor:
                 target_path.unlink()
             raise ValueError(f"Failed to process image: {str(e)}")
     
+    def _extract_spreadsheet(self, file_path: Path) -> str:
+        """Extract text from spreadsheet files (Excel, CSV).
+        
+        Handles:
+        - Excel files (XLSX, XLS)
+        - CSV files
+        - Preserves sheet names, headers, and data structure
+        
+        Args:
+            file_path: Path to the spreadsheet file
+            
+        Returns:
+            Extracted text with preserved structure
+            
+        Raises:
+            ValueError: If file is empty or cannot be processed
+        """
+        try:
+            # Determine file type
+            if file_path.suffix.lower() == '.csv':
+                df = pd.read_csv(file_path)
+                sheets = {'Sheet1': df}  # CSV files have one sheet
+            else:
+                # Excel files can have multiple sheets
+                sheets = pd.read_excel(file_path, sheet_name=None)
+            
+            # Process each sheet
+            text_parts = []
+            for sheet_name, df in sheets.items():
+                if df.empty:
+                    continue
+                    
+                # Add sheet name as header
+                text_parts.append(f"Sheet: {sheet_name}\n{'='*40}\n")
+                
+                # Convert headers and data to string format
+                headers = df.columns.tolist()
+                text_parts.append(f"Headers: {', '.join(str(h) for h in headers)}\n")
+                
+                # Process each row
+                for idx, row in df.iterrows():
+                    row_text = [f"{headers[i]}: {str(val)}" for i, val in enumerate(row)]
+                    text_parts.append(f"Row {idx + 1}:\n" + '\n'.join(row_text) + '\n')
+                
+                text_parts.append('\n' + '-'*40 + '\n')  # Sheet separator
+            
+            return '\n'.join(text_parts)
+            
+        except Exception as e:
+            raise ValueError(f"Failed to process spreadsheet: {str(e)}")
+
     def _extract_text(self, file_path: Path, file_type: str) -> str:
         """Extract text from text-based files with proper formatting preservation.
         
