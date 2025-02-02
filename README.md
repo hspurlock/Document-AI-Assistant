@@ -198,24 +198,36 @@ streamlit run app.py
 ## Core Components
 
 ### Frontend
-- **Streamlit**: Interactive web interface
-- **Real-time Updates**: Progress indicators and status messages
-- **Document Management**: Upload, select, and delete functionality
+- **Streamlit**: Modern, responsive web interface
+- **Real-time Updates**: Dynamic progress tracking and status indicators
+- **Document Management**: Intuitive upload, selection, and deletion interface
+- **Interactive Chat**: Context-aware conversation with documents
 
 ### Backend
-- **LangChain**: Document processing and LLM integration
-- **Qdrant**: Vector storage and semantic search
-- **Ollama**: Local LLM hosting and inference
+- **LangChain**: Framework for LLM integration and document processing
+- **Qdrant**: High-performance vector database for semantic search
+- **Ollama**: Local model serving with support for:
+  - llama3.2: Primary chat model
+  - llama3.2-vision: Advanced image processing
+  - deepseek-r1: Enhanced chat capabilities
 
-### Processing
-- **Document Handling**: PDF, DOCX, and TXT support
-- **Text Extraction**: Automatic content parsing
-- **Chunking**: Smart text segmentation
+### Processing Pipeline
+- **Document Processing**:
+  - PDF extraction with PyPDF
+  - DOCX parsing with python-docx
+  - Text file handling with encoding detection
+  - Image processing with llama3.2-vision
+- **Content Analysis**:
+  - Smart text chunking with overlap
+  - Metadata extraction and preservation
+  - Vector embedding generation
+  - Image content extraction and analysis
 
-### Security
-- **Rate Limiting**: Request throttling
-- **Input Validation**: Content sanitization
-- **Error Handling**: Clear error messages
+### Security & Performance
+- **Rate Limiting**: Protects against API abuse
+- **Input Validation**: Comprehensive content sanitization
+- **Error Handling**: Graceful error recovery with clear messages
+- **Resource Management**: Efficient cleanup of temporary files
 
 ## License
 
