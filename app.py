@@ -270,15 +270,20 @@ with st.sidebar:
         
         # Display any error messages that occurred during processing
         if has_errors:
+            error_container = st.empty()
             for msg in st.session_state.upload_status_messages:
                 if msg['type'] == 'error':
-                    st.error(msg['text'])
+                    error_container.error(msg['text'])
+                    # Add a delay to ensure error is visible
+                    import time
+                    time.sleep(2)
             # Clear the messages to prevent them from showing again
             st.session_state.upload_status_messages = []
         
         # After all files are processed, increment cache key and rerun
         st.session_state.doc_cache_key += 1
-        st.rerun()
+        if not has_errors:
+            st.rerun()
 
     st.write("---")
     

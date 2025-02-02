@@ -162,56 +162,96 @@ class AIAgent:
             ProcessedFile with chunks and metadata, or None if processing fails
         """
         try:
-            # Process the file
-            processed_file = self.doc_processor.process_file(file_path, original_filename)
-            if not processed_file:
+            # Validate file path
+            if not file_path or not file_path.exists():
+                print(f"Error: File does not exist - {file_path}")
                 return None
+                
+            print(f"Processing file: {file_path}")
+            
+            # Process the file
+            try:
+                processed_file = self.doc_processor.process_file(file_path, original_filename)
+                if not processed_file:
+                    print(f"Error: Document processor returned None for {file_path}")
+                    return None
+                if not processed_file.chunks:
+                    print(f"Error: No chunks extracted from {file_path}")
+                    return None
+            except Exception as e:
+                print(f"Error in document processing: {str(e)}")
+                return None
+            
+            print(f"Successfully processed file, creating vectors...")
             
             # Create points for vector store
             points = []
             
             # Create points from document chunks (both regular and image)
             for chunk in processed_file.chunks:
-                points.append(models.PointStruct(
-                    id=str(uuid.uuid4()),
-                    payload={
-                        'text': chunk.text,
-                        'source': original_filename or str(file_path),
-                        'filename': original_filename or file_path.name,
-                        'checksum': processed_file.checksum,
-                        'page': chunk.metadata.get('page', ''),
-                        'chunk_type': chunk.metadata.get('chunk_type', 'text'),
-                        'width': chunk.metadata.get('width'),  # Will be None for non-images
-                        'height': chunk.metadata.get('height'),
-                        'format': chunk.metadata.get('format')
-                    },
-                    vector=self.embeddings.embed_query(chunk.text)
-                ))
+                try:
+                    # Generate embedding for chunk
+                    vector = self.embeddings.embed_query(chunk.text)
+                    
+                    points.append(models.PointStruct(
+                        id=str(uuid.uuid4()),
+                        payload={
+                            'text': chunk.text,
+                            'source': original_filename or str(file_path),
+                            'filename': original_filename or file_path.name,
+                            'checksum': processed_file.checksum,
+                            'page': chunk.metadata.get('page', ''),
+                            'chunk_type': chunk.metadata.get('chunk_type', 'text'),
+                            'width': chunk.metadata.get('width'),  # Will be None for non-images
+                            'height': chunk.metadata.get('height'),
+                            'format': chunk.metadata.get('format')
+                        },
+                        vector=vector
+                    ))
+            
+                except Exception as e:
+                    print(f"Error creating vector for chunk: {str(e)}")
+                    continue
+            
+            if not points:
+                print(f"Error: No valid vectors created for {file_path}")
+                return None
+                
+            print(f"Created {len(points)} vectors, updating store...")
             
             # Update vector store
-            if is_update:
-                # Delete existing points for this file
-                self.client.delete(
-                    collection_name=self.collection_name,
-                    points_selector=models.FilterSelector(
-                        filter=models.Filter(
-                            must=[
-                                models.FieldCondition(
-                                    key="filename",  # Use filename instead of source
-                                    match=models.MatchValue(value=original_filename or file_path.name)
-                                )
-                            ]
+            try:
+                if is_update:
+                    # Delete existing points for this file
+                    print(f"Deleting existing vectors for {file_path}...")
+                    self.client.delete(
+                        collection_name=self.collection_name,
+                        points_selector=models.FilterSelector(
+                            filter=models.Filter(
+                                must=[
+                                    models.FieldCondition(
+                                        key="filename",  # Use filename instead of source
+                                        match=models.MatchValue(value=original_filename or file_path.name)
+                                    )
+                                ]
+                            )
                         )
                     )
+                
+                # Insert new points
+                print(f"Inserting {len(points)} new vectors...")
+                self.client.upsert(
+                    collection_name=self.collection_name,
+                    points=points
                 )
-            
-            # Insert new points
-            self.client.upsert(
-                collection_name=self.collection_name,
-                points=points
-            )
-            
-            return processed_file
+                
+                print(f"Successfully processed and stored {file_path}")
+                return processed_file
+                
+            except Exception as e:
+                print(f"Error updating vector store: {str(e)}")
+                return None
+                
         except Exception as e:
             print(f"Error in process_file: {str(e)}")
             return None

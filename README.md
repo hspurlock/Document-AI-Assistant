@@ -120,14 +120,14 @@ streamlit run app.py
   - Images: Multi-stage processing pipeline
 
 - **Image Analysis**:
-  - Primary: Llava Vision Model
+  - Uses llama3.2-vision for image processing:
     - Advanced text extraction from images
     - Rich image descriptions
     - Object detection and classification
     - Direct API integration with Ollama
-  - Fallback Models:
-    - llama3.2-vision for complex images
-    - llama2 as final fallback
+  - Optimized for accuracy and performance
+    - Fast processing of complex images
+    - High-quality text extraction
   - Enhanced Metadata:
     - Image dimensions and format
     - Detected objects and text
